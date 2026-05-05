@@ -1,0 +1,18 @@
+# Azure SDK
+azure-ai-projects>=2.1.0
+azure-identity>=1.25.0
+
+# Microsoft Agent Framework
+agent-framework>=1.2.0
+
+# Local vector search
+chromadb>=0.4.0
+onnxruntime>=1.17.0
+fastembed>=0.2.0
+
+# Document processing
+pypdf>=4.0.0
+python-docx>=1.0.0
+
+# Async support
+asyncio-compat
