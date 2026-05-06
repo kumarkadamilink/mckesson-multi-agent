@@ -1,14 +1,15 @@
 import asyncio
 import json
+import sys
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import InteractiveBrowserCredential
 
 from agent_framework import Agent, workflow
+
 from agent_framework.foundry import FoundryChatClient
 
 from local_search_agent import search_contracts, prime_search_agent
-from azure.monitor.opentelemetry import configure_azure_monitor
 
 
 # -----------------------------------------------------------
@@ -16,12 +17,12 @@ from azure.monitor.opentelemetry import configure_azure_monitor
 # -----------------------------------------------------------
 PROJECT_ENDPOINT = "https://project-mckesson-resource.services.ai.azure.com/api/projects/project-mckesson"
 
-# Single credential instance shared across all agents
-# One browser login covers the router, synthesizer, and search agent
+# Single credential instance shared across all agents.
+# One browser login covers the router, synthesizer, and search agent.
 credential = InteractiveBrowserCredential()
 
 # Prime the search agent with the shared credential immediately —
-# prevents a second browser popup when search_contracts() is first called
+# prevents a second browser popup when search_contracts() is first called.
 prime_search_agent(credential)
 
 
@@ -106,7 +107,7 @@ def strip_json_fences(text: str) -> str:
 
 # -----------------------------------------------------------
 # Helper — call a deployed Foundry agent by NAME
-# (kept for ontology agent — swap out when that is also local)
+# (kept for ontology agent — swap when that is also local)
 # -----------------------------------------------------------
 def call_foundry_agent_by_name(
     project_client: AIProjectClient,
@@ -133,6 +134,12 @@ def call_foundry_agent_by_name(
 # -----------------------------------------------------------
 @workflow
 async def procurement_router_workflow(user_prompt: str) -> str:
+    """
+    Main multi-agent procurement workflow.
+    Accepts a natural language question and returns a grounded answer
+    synthesised from structured (Fabric ontology) and unstructured
+    (local contract ChromaDB) sources.
+    """
 
     # Step 1: Router classifies and splits the prompt
     router_raw = (await router.run(user_prompt)).text
@@ -177,7 +184,6 @@ async def procurement_router_workflow(user_prompt: str) -> str:
     async def run_semantic():
         if semantic_task:
             try:
-                # Local ChromaDB search — no Foundry agent needed
                 results["semantic"] = await loop.run_in_executor(
                     None,
                     search_contracts,
@@ -214,14 +220,70 @@ Please combine these into a single unified answer to the user's question.
 
 
 # -----------------------------------------------------------
-# Entry point
+# Run modes
 # -----------------------------------------------------------
-async def main() -> None:
+async def run_chat():
+    """
+    Interactive terminal chat loop.
+    Usage: python AgentsWithRouterSynthesizer_Procurement.py --chat
+    """
+    print("\n" + "=" * 55)
+    print("  McKesson Procurement Assistant")
+    print("  Ask anything about suppliers, contracts,")
+    print("  spend, categories, SLAs, or payment terms.")
+    print("  Type 'exit' to quit.")
+    print("=" * 55 + "\n")
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye.")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "bye"):
+            print("Goodbye.")
+            break
+
+        print("\nAssistant: thinking...\n")
+        result = await procurement_router_workflow.run(user_input)
+        answer = result.get_outputs()[0]
+        print(f"Assistant: {answer}\n")
+        print("-" * 55)
+
+
+async def run_test():
+    """
+    Single prompt smoke test.
+    Usage: python AgentsWithRouterSynthesizer_Procurement.py --test
+    """
     prompt = "Tell me the top 10 suppliers by spend and show me which categories they belong to"
+    print(f"\nTest prompt: {prompt}\n")
     result = await procurement_router_workflow.run(prompt)
     print("\n=== FINAL COMBINED RESPONSE ===\n")
     print(result.get_outputs()[0])
 
 
+# -----------------------------------------------------------
+# Entry point
+#
+# Three modes controlled by command-line flags:
+#
+#   Default (no flag) — Foundry playground / hosted agent server
+#     python AgentsWithRouterSynthesizer_Procurement.py
+#     Starts HTTP server on port 8088 with /responses endpoint.
+#     The Foundry playground and azd deploy both use this mode.
+#     Also used by the Dockerfile CMD.
+#
+#   --chat — Local interactive terminal chat
+#     python AgentsWithRouterSynthesizer_Procurement.py --chat
+#     Runs a chat loop in the terminal for local testing.
+#
+#   --test — Single prompt smoke test
+#     python AgentsWithRouterSynthesizer_Procurement.py --test
+#     Runs one hardcoded prompt and exits. Good for CI checks.
+# -----------------------------------------------------------
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_test())

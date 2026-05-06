@@ -25,7 +25,7 @@ services:
                   sku:
                     capacity: 225
                     name: GlobalStandard
-            startupCommand: python AgentsWithRouterSynthesizer_Procurement.py
+            startupCommand: python server.py
 infra:
     provider: bicep
     path: ./infra

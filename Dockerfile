@@ -20,13 +20,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY AgentsWithRouterSynthesizer_Procurement.py .
 COPY local_search_agent.py .
 COPY index_documents.py .
+COPY server.py .
 
 # Copy the pre-built ChromaDB index and contract documents
-# These are embedded in the image so no indexing needed at runtime
 COPY data/ ./data/
 
 # Expose port expected by Foundry hosted agent runtime
-EXPOSE 8000
+EXPOSE 8088
 
-# Start command (mirrors azure.yaml startupCommand)
-CMD ["python", "AgentsWithRouterSynthesizer_Procurement.py"]
+# Start the FastAPI server
+CMD ["python", "server.py"]

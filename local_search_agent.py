@@ -31,7 +31,7 @@ from azure.identity import InteractiveBrowserCredential
 CHROMA_DIR       = Path("data/chroma_db")
 COLLECTION_NAME  = "procurement_contracts"
 EMBED_MODEL      = "BAAI/bge-small-en-v1.5"
-TOP_K            = 5
+TOP_K            = 10
 PROJECT_ENDPOINT = "https://project-mckesson-resource.services.ai.azure.com/api/projects/project-mckesson"
 
 
@@ -98,27 +98,62 @@ def prime_search_agent(credential):
 # ─────────────────────────────────────────────
 # RETRIEVAL
 # ─────────────────────────────────────────────
+# Known supplier names for auto-detection
+KNOWN_SUPPLIERS = [
+    "Miller Group", "Branch and Sons", "Moore Henderson and Bennett",
+    "Hardy PLC", "Garcia-Zavala", "Hernandez Cuevas and Webb",
+    "Vargas PLC", "Smith-Gutierrez", "Kirby and Sons", "Peterson PLC",
+]
+
+def _detect_supplier(query: str) -> str:
+    """
+    Auto-detect a supplier name mentioned in the query.
+    Returns the supplier name if found, else None.
+    """
+    query_lower = query.lower()
+    for supplier in KNOWN_SUPPLIERS:
+        # Match on first distinctive word e.g. "Miller", "Hardy", "Peterson"
+        key = supplier.split()[0].lower()
+        if key in query_lower:
+            return supplier
+    return None
+
+
 def retrieve_chunks(query: str, top_k: int = TOP_K,
                     supplier_filter: str = None) -> list:
     """
     Embed the query and retrieve the top_k most similar chunks.
-    Optionally filter by supplier name.
+    Auto-detects supplier from query if not explicitly supplied.
+    When a supplier is detected, fetches ALL their chunks first
+    then re-ranks by score — ensures no chunk boundary misses.
     """
     model      = _get_embed_model()
     collection = _get_collection()
 
     query_vec = list(model.embed([query]))[0].tolist()
 
-    where = None
-    if supplier_filter:
-        where = {"supplier": {"$eq": supplier_filter}}
+    # Auto-detect supplier if not explicitly passed
+    if not supplier_filter:
+        supplier_filter = _detect_supplier(query)
 
-    results = collection.query(
-        query_embeddings=[query_vec],
-        n_results=min(top_k, collection.count()),
-        where=where,
-        include=["documents", "metadatas", "distances"],
-    )
+    if supplier_filter:
+        print(f"[SearchAgent] Supplier filter: {supplier_filter}")
+        # Fetch all chunks for this supplier, then re-rank by vector score
+        where = {"supplier": {"$eq": supplier_filter}}
+        total = collection.count()
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=min(total, collection.count()),
+            where=where,
+            include=["documents", "metadatas", "distances"],
+        )
+    else:
+        # No supplier detected — broad search across all contracts
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=min(top_k, collection.count()),
+            include=["documents", "metadatas", "distances"],
+        )
 
     chunks = []
     for doc, meta, dist in zip(
@@ -138,7 +173,7 @@ def retrieve_chunks(query: str, top_k: int = TOP_K,
         })
 
     chunks.sort(key=lambda x: x["score"], reverse=True)
-    return chunks
+    return chunks[:top_k]
 
 
 def format_context(chunks: list) -> str:
